@@ -53,24 +53,27 @@ func serverMain() {
 }
 
 func read(conn net.Conn,commands []string) {
+	var genError error
   filename:=strings.TrimSpace(commands[0])
   mutex.RLock()  
     m_instance:=filestore[filename]
   mutex.RUnlock()
   if(m_instance.version==0) {
-      conn.Write([]byte("ERR_FILE_NOT_FOUND\r\n"))
+      _, genError=conn.Write([]byte("ERR_FILE_NOT_FOUND\r\n"))
     } else {
-      conn.Write([]byte("CONTENTS "+strconv.FormatInt(m_instance.version,10) +" "+strconv.FormatInt(m_instance.numbytes,10) +" "+" "+strconv.FormatInt(m_instance.exptime,10) +"\r\n"+m_instance.content+"\r\n"))
+      _, genError=conn.Write([]byte("CONTENTS "+strconv.FormatInt(m_instance.version,10) +" "+strconv.FormatInt(m_instance.numbytes,10) +" "+" "+strconv.FormatInt(m_instance.exptime,10) +"\r\n"+m_instance.content+"\r\n"))
     }
+	checkError(genError, conn)
 }
 
 func write(conn net.Conn,commands []string) {
+	var genError error
 	filename:= strings.TrimSpace(commands[0])
 	numbytes,_:= strconv.ParseInt(commands[1],10,64)
 	var content string
 	var exptime int64
 	var lastLived time.Time
-	if(len(commands)==4){
+	if(len(commands)!=3){
 	 exptime,_:= strconv.ParseInt(commands[2],10,64)
 	 lastLived:=time.Now().Add(time.Duration(exptime)*time.Second)
 	 content= strings.TrimSpace(commands[4])
@@ -88,18 +91,66 @@ func write(conn net.Conn,commands []string) {
 	}
 
 	mutex.Lock()
-	filestore[key]=m_instance
+	filestore[filename]=m_instance
 	mutex.Unlock()  
-	conn.Write([]byte("OK "+strconv.FormatInt(unique_version,10)+"\r\n"))
+	_, genError=conn.Write([]byte("OK "+strconv.FormatInt(unique_version,10)+"\r\n"))
+	checkError(genError, conn)
 
 }
 
 func cas(conn net.Conn,commands []string) {
+	var genError error
+	filename:= strings.TrimSpace(commands[0])
+	version,_:= strconv.ParseInt(commands[1],10,64)
+	numbytes,_:= strconv.ParseInt(commands[2],10,64)
+	var content string
+	var exptime int64
+	var lastLived time.Time
+	if(len(commands)!=4){
+	 exptime,_:= strconv.ParseInt(commands[2],10,64)
+	 lastLived:=time.Now().Add(time.Duration(exptime)*time.Second)
+	 content= strings.TrimSpace(commands[4])
+	} else {
+	 content= strings.TrimSpace(commands[3])
+	}
+	if(filestore[filename].version==0) {
+          conn.Write([]byte("ERR_FILE_NOT_FOUND\r\n"))
+	} else if(filestore[filename].version!=version) {
+          conn.Write([]byte("ERR_VERSION\r\n"))
+      	}
+	else {
+		unique_version+=1
+		m_instance:= Filestore{
+		content,
+		numbytes,
+		unique_version,
+		exptime,
+		lastLived,
+		}
 
+		mutex.Lock()
+		filestore[filename]=m_instance
+		mutex.Unlock()  
+		_, genError=conn.Write([]byte("OK "+strconv.FormatInt(unique_version,10)+"\r\n"))
+		checkError(genError, conn)
+	}
 }
 
 func deleteEntry(conn net.Conn,commands []string) {
+  filename:=strings.TrimSpace(commands[0])
+	var genError error
+  mutex.Lock() 
+    m_instance:=filestore[filename]
 
+  //checking if the version is zero then that means there is no such value in the map
+  if(m_instance.version==0) {
+      _, genError=conn.Write([]byte("ERR_FILE_NOT_FOUND\r\n"))
+    } else {
+          delete(filestore,filename)
+          _, genError=conn.Write([]byte("OK\r\n"))
+    }
+  mutex.Unlock()
+	checkError(genError, conn)
 }
 
 func checkTimeStamp() {
@@ -121,12 +172,10 @@ func handleRequest(conn net.Conn) {
   defer conn.Close()
   
   for {
+	var genError error
       buffer := make([]byte, 1024)
-      bufsize, err := conn.Read(buffer)
-      
-      if err != nil {
-        log.Print("Error reading:", err.Error())
-      }
+      bufsize, genError := conn.Read(buffer)
+	checkError(genError, conn)
 
       buffer= buffer[:bufsize]
 
@@ -155,7 +204,14 @@ func handleRequest(conn net.Conn) {
             deleteEntry(conn,newArrayOfCommands[1:]) 
 
         } else {
-            conn.Write([]byte("ERR_CMD_ERR\r\n"))
+            _, genError=conn.Write([]byte("ERR_CMD_ERR\r\n"))
+		checkError(genError, conn)
         }
     }
+}
+func checkError(genError error, conn net.Conn) {
+	if genError != nil {
+		err := "ERR_INTERNAL\r\n"
+		_, genError = conn.Write([]byte(err))
+	}
 }
