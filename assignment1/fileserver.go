@@ -20,6 +20,7 @@ type Fileserve struct {
   numbytes int64
   version int64
   exptime int64
+  lastLived time.Time
 }
 
  var filestore =make(map[string]Fileserve)
@@ -51,15 +52,49 @@ func serverMain() {
     }
 }
 
-func read(conn net.Conn,commands []string,noReply *bool) {
+func read(conn net.Conn,commands []string) {
+  filename:=strings.TrimSpace(commands[0])
+  mutex.RLock()  
+    m_instance:=filestore[filename]
+  mutex.RUnlock()
+  if(m_instance.version==0) {
+      conn.Write([]byte("ERR_FILE_NOT_FOUND\r\n"))
+    } else {
+      conn.Write([]byte("CONTENTS "+strconv.FormatInt(m_instance.version,10) +" "+strconv.FormatInt(m_instance.numbytes,10) +" "+" "+strconv.FormatInt(m_instance.exptime,10) +"\r\n"+m_instance.content+"\r\n"))
+    }
+}
+
+func write(conn net.Conn,commands []string) {
+	filename:= strings.TrimSpace(commands[0])
+	numbytes,_:= strconv.ParseInt(commands[1],10,64)
+	var content string
+	var exptime int64
+	var lastLived time.Time
+	if(len(commands)==4){
+	 exptime,_:= strconv.ParseInt(commands[2],10,64)
+	 lastLived:=time.Now().Add(time.Duration(exptime)*time.Second)
+	 content= strings.TrimSpace(commands[4])
+	} else {
+	 content= strings.TrimSpace(commands[3])
+	}
+	unique_version+=1
+
+	m_instance:= Filestore{
+	content,
+	numbytes,
+	unique_version,
+	exptime,
+	lastLived,
+	}
+
+	mutex.Lock()
+	filestore[key]=m_instance
+	mutex.Unlock()  
+	conn.Write([]byte("OK "+strconv.FormatInt(unique_version,10)+"\r\n"))
 
 }
 
-func write(conn net.Conn,commands []string,noReply *bool) {
-
-}
-
-func cas(conn net.Conn,commands []string,noReply *bool) {
+func cas(conn net.Conn,commands []string) {
 
 }
 
@@ -69,13 +104,13 @@ func deleteEntry(conn net.Conn,commands []string) {
 
 func checkTimeStamp() {
     
-    for key, content := range filestore {
+    for filename, content := range filestore {
         
         now:=time.Now()
         
         if(now.After(content.lastLived) && content.exptime!=0) {
             mutex.Lock()  
-              delete(filestore,key)
+              delete(filestore,filename)
             mutex.Unlock()  
         }
     }
@@ -101,33 +136,26 @@ func handleRequest(conn net.Conn) {
 
       arrayOfCommands:= strings.Fields(lineSeparator[0])
       var newArrayOfCommands[] string
-      if len(lineSeparator) >1 {
-          newArrayOfCommands = make([] string,len(arrayOfCommands),len(arrayOfCommands)+1)
-          copy(newArrayOfCommands,arrayOfCommands)
-          newArrayOfCommands=append(newArrayOfCommands,lineSeparator[1])
-      } else {
-          newArrayOfCommands= make([] string,len(arrayOfCommands))
-          copy(newArrayOfCommands,arrayOfCommands)
-      }   
+	  newArrayOfCommands = make([] string,len(arrayOfCommands),len(arrayOfCommands)+1)
+	  copy(newArrayOfCommands,arrayOfCommands)
+	  newArrayOfCommands=append(newArrayOfCommands,lineSeparator[1])
 
       checkTimeStamp()
-
-      var noReply bool= false
       
       if(arrayOfCommands[0]=="read") {
-            read(conn,newArrayOfCommands[1:],&noReply)
+            read(conn,newArrayOfCommands[1:])
 
         } else if(arrayOfCommands[0]=="write") {
             write(conn,newArrayOfCommands[1:])
 
         } else if(arrayOfCommands[0]=="cas") {
-            cas(conn,newArrayOfCommands[1:],&noReply)
+            cas(conn,newArrayOfCommands[1:])
 
         } else if(arrayOfCommands[0]=="delete") {
             deleteEntry(conn,newArrayOfCommands[1:]) 
 
         } else {
-            conn.Write([]byte("ERRCMDERR\r\n"))
+            conn.Write([]byte("ERR_CMD_ERR\r\n"))
         }
     }
 }
