@@ -4,7 +4,7 @@
 ## Description
 
 This assignment is to build a simple file server, with a simple read/write interface (there’s no open/delete/rename). The file contents are in memory. There are two features that this file system has that traditional file systems don’t.<br/>
-1. Each file has a version, and the API supports a `compare and swap` operation based on the version.
+1. Each file has a version, and the API supports a `compare and swap` operation based on the version.<br/>
 2. Files can optionally expire after some time.
 
 # Installation Instructions
