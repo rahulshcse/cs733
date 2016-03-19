@@ -128,7 +128,7 @@ func TestHeal (t *testing.T) {
 	time.Sleep(20*time.Second)
 	fmt.Printf("Clusters healed into one\n")
 	Heal(rafts)
-	time.Sleep(100*time.Second)
+	time.Sleep(50*time.Second)
 	if rafts[1].LeaderId() == rafts[2].LeaderId() && rafts[2].LeaderId() == rafts[3].LeaderId() && rafts[3].LeaderId() == rafts[4].LeaderId() && rafts[4].LeaderId() == rafts[5].LeaderId() {
 		fmt.Printf("Healed Network Partition has leader %d\n", rafts[1].LeaderId())
 		fmt.Printf("Heal Partitions test successful\n")
