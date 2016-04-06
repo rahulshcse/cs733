@@ -1,0 +1,11 @@
+{
+    "tm":[
+	{"id":1,"ElectionTimeout":2000,"HeartbeatTimeout":1000},
+	{"id":2,"ElectionTimeout":3130,"HeartbeatTimeout":1565},
+	{"id":3,"ElectionTimeout":3332,"HeartbeatTimeout":1666},
+	{"id":4,"ElectionTimeout":3532,"HeartbeatTimeout":1766},
+	{"id":5,"ElectionTimeout":3732,"HeartbeatTimeout":1866}
+   ]
+}
+
+
