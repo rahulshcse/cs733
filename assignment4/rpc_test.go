@@ -12,18 +12,42 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"os"
 )
 
-func TestRPCMain(t *testing.T) {
-	go serverMain()
-	time.Sleep(1 * time.Second)
+func DeleteOldLogs() { 
+	os.RemoveAll("fslog1")
+	os.RemoveAll("fslog2")
+	os.RemoveAll("fslog3")
+	os.RemoveAll("fslog4")
+	os.RemoveAll("fslog5")
+	os.RemoveAll("log1")
+	os.RemoveAll("log2")
+	os.RemoveAll("log3")
+	os.RemoveAll("log4")
+	os.RemoveAll("log5")
+ }
+
+func TestStart (t *testing.T) {
+	fmt.Printf("\n\n\n\n\n\n\n\n***File System Test started***\n")
+	DeleteOldLogs()
+	time.Sleep(5*time.Second)
+	fmt.Printf("Old logs deleted\n")
 }
 
-func expect(t *testing.T, response *Msg, expected *Msg, errstr string, err error) {
+func TestRPCMain1(t *testing.T) {
+	go serverMain()
+	time.Sleep(10 * time.Second)
+}
+
+func expect(t *testing.T, response *Msg, expected *Msg, errstr string, err error) int {
 	if err != nil {
 		t.Fatal("Unexpected error: " + err.Error())
 	}
 	ok := true
+	if response.Kind == 'N' {
+		return 1
+	}
 	if response.Kind != expected.Kind {
 		ok = false
 		errstr += fmt.Sprintf(" Got kind='%c', expected '%c'", response.Kind, expected.Kind)
@@ -41,74 +65,103 @@ func expect(t *testing.T, response *Msg, expected *Msg, errstr string, err error
 	if !ok {
 		t.Fatal("Expected " + errstr)
 	}
+	return 0
 }
 
-func TestRPC_BasicSequential(t *testing.T) {
+func TestRPC_BasicSequential1(t *testing.T) {
+	var expint int
 	cl := mkClient(t)
 	defer cl.close()
 
 	// Read non-existent file cs733net
 	m, err := cl.read("cs733net")
-	expect(t, m, &Msg{Kind: 'F'}, "file not found", err)
+	expint = expect(t, m, &Msg{Kind: 'F'}, "file not found", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		return
+	}
+}
 
-	// Read non-existent file cs733net
-	m, err = cl.delete("cs733net")
-	expect(t, m, &Msg{Kind: 'F'}, "file not found", err)
-
+func TestRPC_BasicSequential2(t *testing.T) {
+	var expint int
+	serverNodeClose(1)
+	time.Sleep(10*time.Second)
+	cl := mkClient(t)
+	defer cl.close()
+	top:
+	fmt.Printf("Client connection successful with leader id %d\n", getLeader())
 	// Write file cs733net
 	data := "Cloud fun"
-	m, err = cl.write("cs733net", data, 0)
-	expect(t, m, &Msg{Kind: 'O'}, "write success", err)
+	m, err := cl.write("cs733net", data, 0)
+	expint = expect(t, m, &Msg{Kind: 'O'}, "write success", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		goto top;
+	}
 
 	// Expect to read it back
 	m, err = cl.read("cs733net")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(data)}, "read my write", err)
+	expint = expect(t, m, &Msg{Kind: 'C', Contents: []byte(data)}, "read my write", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		goto top;
+	}
 
 	// CAS in new value
 	version1 := m.Version
 	data2 := "Cloud fun 2"
 	// Cas new value
 	m, err = cl.cas("cs733net", version1, data2, 0)
-	expect(t, m, &Msg{Kind: 'O'}, "cas success", err)
-
-	// Expect to read it back
-	m, err = cl.read("cs733net")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(data2)}, "read my cas", err)
+	expint = expect(t, m, &Msg{Kind: 'O'}, "cas success", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		goto top;
+	}
 
 	// Expect Cas to fail with old version
 	m, err = cl.cas("cs733net", version1, data, 0)
-	expect(t, m, &Msg{Kind: 'V'}, "cas version mismatch", err)
-
-	// Expect a failed cas to not have succeeded. Read should return data2.
-	m, err = cl.read("cs733net")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(data2)}, "failed cas to not have succeeded", err)
-
-	// delete
-	m, err = cl.delete("cs733net")
-	expect(t, m, &Msg{Kind: 'O'}, "delete success", err)
-
-	// Expect to not find the file
-	m, err = cl.read("cs733net")
-	expect(t, m, &Msg{Kind: 'F'}, "file not found", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		goto top;
+	}
+	cl.close()
 }
 
 func TestRPC_Binary(t *testing.T) {
+	var expint int
 	cl := mkClient(t)
 	defer cl.close()
-
+	top:
 	// Write binary contents
 	data := "\x00\x01\r\n\x03" // some non-ascii, some crlf chars
 	m, err := cl.write("binfile", data, 0)
-	expect(t, m, &Msg{Kind: 'O'}, "write success", err)
+	expint = expect(t, m, &Msg{Kind: 'O'}, "write success", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		goto top;
+	}
+
+	go FileServers[1].startServer()
 
 	// Expect to read it back
 	m, err = cl.read("binfile")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(data)}, "read my write", err)
-
+	expint = expect(t, m, &Msg{Kind: 'C', Contents: []byte(data)}, "read my write", err)
+	cl.close()
 }
 
 func TestRPC_Chunks(t *testing.T) {
-	// Should be able to accept a few bytes at a time
+	var expint int
 	cl := mkClient(t)
 	defer cl.close()
 	var err error
@@ -117,7 +170,7 @@ func TestRPC_Chunks(t *testing.T) {
 			err = cl.send(chunk)
 		}
 	}
-
+	top:
 	// Send the command "write teststream 10\r\nabcdefghij\r\n" in multiple chunks
 	// Nagle's algorithm is disabled on a write, so the server should get these in separate TCP packets.
 	snd("wr")
@@ -131,89 +184,23 @@ func TestRPC_Chunks(t *testing.T) {
 	snd("\n")
 	var m *Msg
 	m, err = cl.rcv()
-	expect(t, m, &Msg{Kind: 'O'}, "writing in chunks should work", err)
-}
-
-func TestRPC_Batch(t *testing.T) {
-	// Send multiple commands in one batch, expect multiple responses
-	cl := mkClient(t)
-	defer cl.close()
-	cmds := "write batch1 3\r\nabc\r\n" +
-		"write batch2 4\r\ndefg\r\n" +
-		"read batch1\r\n"
-
-	cl.send(cmds)
-	m, err := cl.rcv()
-	expect(t, m, &Msg{Kind: 'O'}, "write batch1 success", err)
-	m, err = cl.rcv()
-	expect(t, m, &Msg{Kind: 'O'}, "write batch2 success", err)
-	m, err = cl.rcv()
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte("abc")}, "read batch1", err)
-}
-
-func TestRPC_BasicTimer(t *testing.T) {
-	cl := mkClient(t)
-	defer cl.close()
-
-	// Write file cs733, with expiry time of 2 seconds
-	str := "Cloud fun"
-	m, err := cl.write("cs733", str, 2)
-	expect(t, m, &Msg{Kind: 'O'}, "write success", err)
-
-	// Expect to read it back immediately.
-	m, err = cl.read("cs733")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(str)}, "read my cas", err)
-
-	time.Sleep(3 * time.Second)
-
-	// Expect to not find the file after expiry
-	m, err = cl.read("cs733")
-	expect(t, m, &Msg{Kind: 'F'}, "file not found", err)
-
-	// Recreate the file with expiry time of 1 second
-	m, err = cl.write("cs733", str, 1)
-	expect(t, m, &Msg{Kind: 'O'}, "file recreated", err)
-
-	// Overwrite the file with expiry time of 4. This should be the new time.
-	m, err = cl.write("cs733", str, 3)
-	expect(t, m, &Msg{Kind: 'O'}, "file overwriten with exptime=4", err)
-
-	// The last expiry time was 3 seconds. We should expect the file to still be around 2 seconds later
-	time.Sleep(2 * time.Second)
-
-	// Expect the file to not have expired.
-	m, err = cl.read("cs733")
-	expect(t, m, &Msg{Kind: 'C', Contents: []byte(str)}, "file to not expire until 4 sec", err)
-
-	time.Sleep(3 * time.Second)
-	// 5 seconds since the last write. Expect the file to have expired
-	m, err = cl.read("cs733")
-	expect(t, m, &Msg{Kind: 'F'}, "file not found after 4 sec", err)
-
-	// Create the file with an expiry time of 1 sec. We're going to delete it
-	// then immediately create it. The new file better not get deleted. 
-	m, err = cl.write("cs733", str, 1)
-	expect(t, m, &Msg{Kind: 'O'}, "file created for delete", err)
-
-	m, err = cl.delete("cs733")
-	expect(t, m, &Msg{Kind: 'O'}, "deleted ok", err)
-
-	m, err = cl.write("cs733", str, 0) // No expiry
-	expect(t, m, &Msg{Kind: 'O'}, "file recreated", err)
-
-	time.Sleep(1100 * time.Millisecond) // A little more than 1 sec
-	m, err = cl.read("cs733")
-	expect(t, m, &Msg{Kind: 'C'}, "file should not be deleted", err)
-
+	expint = expect(t, m, &Msg{Kind: 'O'}, "writing in chunks should work", err)
+	if expint == 1 {
+		cl.close()
+		cl = mkClient(t)
+		fmt.Println("Client redirected to another leader\n")
+		goto top;
+	}
+	cl.close()
 }
 
 
 // nclients write to the same file. At the end the file should be
-// any one clients' last write
+// any one clients' last write*/
 
 func TestRPC_ConcurrentWrites(t *testing.T) {
-	nclients := 500
-	niters := 10
+	nclients := 5
+	niters := 1
 	clients := make([]*Client, nclients)
 	for i := 0; i < nclients; i++ {
 		cl := mkClient(t)
@@ -244,93 +231,20 @@ func TestRPC_ConcurrentWrites(t *testing.T) {
 		}(i, clients[i])
 	}
 	time.Sleep(100 * time.Millisecond) // give goroutines a chance
-	sem.Done()                         // Go!
+	sem.Done()                      // Go!
 
 	// There should be no errors
 	for i := 0; i < nclients*niters; i++ {
 		select {
 		case m := <-ch:
-			if m.Kind != 'O' {
+			if m.Kind != 'O' && m.Kind != 'N' {
 				t.Fatalf("Concurrent write failed with kind=%c", m.Kind)
+			} else if m.Kind == 'N' {
+				return
 			}
 		case err := <- errCh:
 			t.Fatal(err)
 		}
-	}
-	m, _ := clients[0].read("concWrite")
-	// Ensure the contents are of the form "cl <i> 9"
-	// The last write of any client ends with " 9"
-	if !(m.Kind == 'C' && strings.HasSuffix(string(m.Contents), " 9")) {
-		t.Fatalf("Expected to be able to read after 1000 writes. Got msg = %v", m)
-	}
-}
-
-// nclients cas to the same file. At the end the file should be any one clients' last write.
-// The only difference between this test and the ConcurrentWrite test above is that each
-// client loops around until each CAS succeeds. The number of concurrent clients has been
-// reduced to keep the testing time within limits.
-func TestRPC_ConcurrentCas(t *testing.T) {
-	nclients := 100
-	niters := 10
-
-	clients := make([]*Client, nclients)
-	for i := 0; i < nclients; i++ {
-		cl := mkClient(t)
-		if cl == nil {
-			t.Fatalf("Unable to create client #%d", i)
-		}
-		defer cl.close()
-		clients[i] = cl
-	}
-
-	var sem sync.WaitGroup // Used as a semaphore to coordinate goroutines to *begin* concurrently
-	sem.Add(1)
-
-	m, _ := clients[0].write("concCas", "first", 0)
-	ver := m.Version
-	if m.Kind != 'O' || ver == 0 {
-		t.Fatalf("Expected write to succeed and return version")
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(nclients)
-
-	errorCh := make(chan error, nclients)
-	
-	for i := 0; i < nclients; i++ {
-		go func(i int, ver int, cl *Client) {
-			sem.Wait()
-			defer wg.Done()
-			for j := 0; j < niters; j++ {
-				str := fmt.Sprintf("cl %d %d", i, j)
-				for {
-					m, err := cl.cas("concCas", ver, str, 0)
-					if err != nil {
-						errorCh <- err
-						return
-					} else if m.Kind == 'O' {
-						break
-					} else if m.Kind != 'V' {
-						errorCh <- errors.New(fmt.Sprintf("Expected 'V' msg, got %c", m.Kind))
-						return
-					}
-					ver = m.Version // retry with latest version
-				}
-			}
-		}(i, ver, clients[i])
-	}
-
-	time.Sleep(100 * time.Millisecond) // give goroutines a chance
-	sem.Done()                         // Start goroutines
-	wg.Wait()                          // Wait for them to finish
-	select {
-	case e := <- errorCh:
-		t.Fatalf("Error received while doing cas: %v", e)
-	default: // no errors
-	}
-	m, _ = clients[0].read("concCas")
-	if !(m.Kind == 'C' && strings.HasSuffix(string(m.Contents), " 9")) {
-		t.Fatalf("Expected to be able to read after 1000 writes. Got msg.Kind = %d, msg.Contents=%s", m.Kind, m.Contents)
 	}
 }
 
@@ -390,9 +304,17 @@ type Client struct {
 
 func mkClient(t *testing.T) *Client {
 	var client *Client
-	raddr, err := net.ResolveTCPAddr("tcp", "localhost:8080")
+	port := 8001 + offset
+	i := 0
+	raddr, err := net.ResolveTCPAddr("tcp", "localhost:"+ strconv.Itoa(port+i))
 	if err == nil {
 		conn, err := net.DialTCP("tcp", nil, raddr)
+		for err != nil {
+			i = (i+1)%5
+			//fmt.Printf("\nTrying with Port no : %d\n", port+i)
+			raddr, _ = net.ResolveTCPAddr("tcp", "localhost:"+ strconv.Itoa(port+i))
+			conn, err = net.DialTCP("tcp", nil, raddr)
+		}
 		if err == nil {
 			client = &Client{conn: conn, reader: bufio.NewReader(conn)}
 		}
@@ -504,6 +426,8 @@ func parseFirst(line string) (msg *Msg, err error) {
 		msg.Kind = 'M'
 	case "ERR_INTERNAL":
 		msg.Kind = 'I'
+	case "ERR_REDIRECT":
+		msg.Kind = 'N'
 	default:
 		err = errors.New("Unknown response " + fields[0])
 	}
