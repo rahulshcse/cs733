@@ -52,12 +52,12 @@ type Msg struct {
 	Version  int
 }
 
-func GetMsg(reader *bufio.Reader) (msg *Msg, msgerr error, fatalerr error) {
+func (fileStore *FS) GetMsg(reader *bufio.Reader) (msg *Msg, msgerr error, fatalerr error) {
 	buf := make([]byte, MAX_FIRST_LINE_SIZE)
-	msg, msgerr, fatalerr = parseFirst(reader, buf)
+	msg, msgerr, fatalerr = fileStore.parseFirst(reader, buf)
 	if fatalerr == nil {
 		if msg.Kind == 'w' /*write*/|| msg.Kind == 'c' /*cas*/|| msg.Kind == 'C' /*CONTENTS*/{
-			msg.Contents, fatalerr = parseSecond(reader, msg.Numbytes)
+			msg.Contents, fatalerr = fileStore.parseSecond(reader, msg.Numbytes)
 		}
 	}
 	return msg, msgerr, fatalerr
@@ -67,12 +67,12 @@ func GetMsg(reader *bufio.Reader) (msg *Msg, msgerr error, fatalerr error) {
 // etc. are fatal errors; it is not possible to know where the command ends, and so we cannot
 // recover to read the next command. The other errors are still errors, but we can at least
 // consume the entirety of the current command.
-func parseFirst(reader *bufio.Reader, buf []byte) (msg *Msg, msgerr error, fatalerr error) {
+func (fileStore *FS) parseFirst(reader *bufio.Reader, buf []byte) (msg *Msg, msgerr error, fatalerr error) {
 	var err error
 	var msgstr string
 	var fields []string
 	
-	if msgstr, err = fillLine(buf, reader); err != nil { // read until EOL
+	if msgstr, err = fileStore.fillLine(buf, reader); err != nil { // read until EOL
 		return nil, nil, err
 	}
 	// validation functions checkN and toInt help avoid repeated use of "if err != nil ". Once
@@ -172,7 +172,7 @@ func parseFirst(reader *bufio.Reader, buf []byte) (msg *Msg, msgerr error, fatal
 	}
 }
 
-func parseSecond(reader *bufio.Reader, numbytes int) (buf []byte, err error) {
+func (fileStore *FS) parseSecond(reader *bufio.Reader, numbytes int) (buf []byte, err error) {
 	if uint(numbytes) > MAX_CONTENT_SIZE {
 		return nil, errors.New(fmt.Sprintf("numbytes cannot exceed %d", MAX_CONTENT_SIZE))
 	}
@@ -192,7 +192,7 @@ func parseSecond(reader *bufio.Reader, numbytes int) (buf []byte, err error) {
 	}
 }
 
-func fillLine(buf []byte, reader *bufio.Reader) (string, error) {
+func (fileStore *FS) fillLine(buf []byte, reader *bufio.Reader) (string, error) {
 	var err error
 	count := 0
 	for {

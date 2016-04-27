@@ -16,10 +16,9 @@ type FileInfo struct {
 
 type FS struct {
 	sync.RWMutex
-	dir map[string]*FileInfo
+	Dir map[string]*FileInfo
 }
 
-var fs = &FS{dir: make(map[string]*FileInfo, 1000)}
 var gversion = 0 // global version
 
 func (fi *FileInfo) cancelTimer() {
@@ -29,16 +28,16 @@ func (fi *FileInfo) cancelTimer() {
 	}
 }
 
-func ProcessMsg(msg *Msg) *Msg {
+func (fileStore *FS) ProcessMsg(msg *Msg) *Msg {
 	switch msg.Kind {
 	case 'r':
-		return processRead(msg)
+		return fileStore.processRead(msg)
 	case 'w':
-		return processWrite(msg)
+		return fileStore.processWrite(msg)
 	case 'c':
-		return processCas(msg)
+		return fileStore.processCas(msg)
 	case 'd':
-		return processDelete(msg)
+		return fileStore.processDelete(msg)
 	}
 
 	// Default: Internal error. Shouldn't come here since
@@ -46,10 +45,10 @@ func ProcessMsg(msg *Msg) *Msg {
 	return &Msg{Kind: 'I'}
 }
 
-func processRead(msg *Msg) *Msg {
-	fs.RLock()
-	defer fs.RUnlock()
-	if fi := fs.dir[msg.Filename]; fi != nil {
+func (fileStore *FS) processRead(msg *Msg) *Msg {
+	fileStore.RLock()
+	defer fileStore.RUnlock()
+	if fi := fileStore.Dir[msg.Filename]; fi != nil {
 		remainingTime := 0
 		if fi.timer != nil {
 			remainingTime := int(fi.absexptime.Sub(time.Now()))
@@ -70,8 +69,8 @@ func processRead(msg *Msg) *Msg {
 	}
 }
 
-func internalWrite(msg *Msg) *Msg {
-	fi := fs.dir[msg.Filename]
+func (fileStore *FS) internalWrite(msg *Msg) *Msg {
+	fi := fileStore.Dir[msg.Filename]
 	if fi != nil {
 		fi.cancelTimer()
 	} else {
@@ -89,7 +88,7 @@ func internalWrite(msg *Msg) *Msg {
 		absexptime = time.Now().Add(dur)
 		timerFunc := func(name string, ver int) func() {
 			return func() {
-				processDelete(&Msg{Kind: 'D',
+				fileStore.processDelete(&Msg{Kind: 'D',
 					Filename: name,
 					Version:  ver})
 			}
@@ -98,47 +97,47 @@ func internalWrite(msg *Msg) *Msg {
 		fi.timer = time.AfterFunc(dur, timerFunc)
 	}
 	fi.absexptime = absexptime
-	fs.dir[msg.Filename] = fi
+	fileStore.Dir[msg.Filename] = fi
 
-	return ok(gversion)
+	return fileStore.ok(gversion)
 }
 
-func processWrite(msg *Msg) *Msg {
-	fs.Lock()
-	defer fs.Unlock()
-	return internalWrite(msg)
+func (fileStore *FS) processWrite(msg *Msg) *Msg {
+	fileStore.Lock()
+	defer fileStore.Unlock()
+	return fileStore.internalWrite(msg)
 }
 
-func processCas(msg *Msg) *Msg {
-	fs.Lock()
-	defer fs.Unlock()
+func (fileStore *FS) processCas(msg *Msg) *Msg {
+	fileStore.Lock()
+	defer fileStore.Unlock()
 
-	if fi := fs.dir[msg.Filename]; fi != nil {
+	if fi := fileStore.Dir[msg.Filename]; fi != nil {
 		if msg.Version != fi.version {
 			return &Msg{Kind: 'V', Version: fi.version}
 		}
 	}
-	return internalWrite(msg)
+	return fileStore.internalWrite(msg)
 }
 
-func processDelete(msg *Msg) *Msg {
-	fs.Lock()
-	defer fs.Unlock()
-	fi := fs.dir[msg.Filename]
+func (fileStore *FS) processDelete(msg *Msg) *Msg {
+	fileStore.Lock()
+	defer fileStore.Unlock()
+	fi := fileStore.Dir[msg.Filename]
 	if fi != nil {
 		if msg.Version > 0 && fi.version != msg.Version {
 			// non-zero msg.Version indicates a delete due to an expired timer
 			return nil // nothing to do
 		}
 		fi.cancelTimer()
-		delete(fs.dir, msg.Filename)
-		return ok(0)
+		delete(fileStore.Dir, msg.Filename)
+		return fileStore.ok(0)
 	} else {
 		return &Msg{Kind: 'F'} // file not found
 	}
 
 }
 
-func ok(version int) *Msg {
+func (fileStore *FS) ok(version int) *Msg {
 	return &Msg{Kind: 'O', Version: version}
 }
