@@ -4,7 +4,7 @@
 # Description
 
 This assignment combines file system of the first assignment with the raft node from the third assignment. File system code used for this assignment has been taken from the following link<br/>
-[a link](https://github.com/cs733-iitb/cs733/tree/master/assignment1)<br/>
+(https://github.com/cs733-iitb/cs733/tree/master/assignment1)<br/>
 The tests of
 the first assignment should work for the most part, except for redirection to a new leader..<br/>
 
